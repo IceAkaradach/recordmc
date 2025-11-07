@@ -77,13 +77,6 @@
             <p id="errorMessage" class="text-sm mt-1"></p>
         </div>
         
-        <!-- Instruction Area for Google  Setup -->
-        <div id="Instruction" class="mt-4 mb-6 p-3 bg-red-50 rounded-lg border border-red-300 text-sm">
-            <div class="font-bold text-red-700 mb-1">🚨 คำเตือน: การเชื่อมต่อ Google </div>
-            <p class="text-red-600">กรุณาตั้งค่า Google Apps Script Web App และนำ URL มาใส่ในตัวแปร **`APPS_SCRIPT_URL`** ในส่วน JavaScript ด้านล่างเพื่อใช้งานการบันทึกอัตโนมัติ (ดูคำแนะนำในไฟล์ `google__setup.md`).</p>
-        </div>
-
-
         <!-- NEW BLOCK: Machine No. Selector -->
         <div class="mb-8 p-4 bg-purple-50 rounded-lg border border-purple-200 shadow-inner">
             <label for="machineNoSelect" class="block text-center font-bold text-lg text-purple-700 mb-2">เลือกหมายเลขเครื่องจักร (Machine No.)</label>
@@ -231,7 +224,7 @@
         <!-- คำแนะนำการใช้งาน -->
         <div class="mt-4 pt-4 border-t border-gray-200">
              <p class="text-sm text-gray-500">
-                💡 **หมายเหตุ:** ข้อมูลจะถูกบันทึกในฐานข้อมูล Firestore ส่วนตัวของคุณ **และ** ส่งไปยัง Google  ที่กำหนดหากตั้งค่า Web App แล้ว
+                💡 **หมายเหตุ:** ข้อมูลจะถูกบันทึกในฐานข้อมูล Firestore ส่วนตัวของคุณ **และ** ส่งไปยัง Google Sheet ผ่าน Web App ที่ตั้งค่าไว้แล้ว
             </p>
         </div>
 
@@ -254,12 +247,11 @@
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         let db, auth, userId = null;
+        let isAuthReady = false; // NEW: Flag เพื่อตรวจสอบความพร้อมของ Firebase
 
-        // *** GOOGLE  CONFIGURATION ***
-        // 1. Google  ID ของคุณ (ที่คุณให้มา)
-        const SPREAD_ID = '1-um_NqLwpGn2paJ6xHnnGiFK23SMhHeH4I-I_lbVaio'; 
-        // 2. URL ของ Google Apps Script Web App (ต้องตั้งค่า Web App ก่อนใช้งาน)
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxdlfxAqxwL0Nc1UdML-Z571OQQcFaERaTP4iiH0xYMbUSoLcxzRqtjCKNqiRea0OUW/exec'; // <-- ต้องเปลี่ยนเป็น URL จริงของคุณ
+        // *** GOOGLE SHEET CONFIGURATION ***
+        const SPREADSHEET_ID = '1-um_NqLwpGn2paJ6xHnnGiFK23SMhHeH4I-I_lbVaio'; 
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxdlfxAqxwL0Nc1UdML-Z571OQQcFaERaTP4iiH0xYMbUSoLcxzRqtjCKNqiRea0OUW/exec';
 
         // Initialize Firebase and Authentication
         async function initializeAppAndAuth() {
@@ -274,17 +266,24 @@
                     await signInAnonymously(auth);
                 }
 
-                onAuthStateChanged(auth, (user) => {
+                // Wait for the user state to be determined
+                const unsubscribe = onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
-                        console.log("Firebase initialized and user signed in:", userId);
                     } else {
-                        userId = crypto.randomUUID();
-                        console.log("Firebase initialized and using anonymous ID:", userId);
+                        // Fallback to random UUID if anonymous sign-in failed or is pending
+                        userId = crypto.randomUUID(); 
                     }
-                    // Enable process button only after auth is ready
+                    
+                    isAuthReady = true; // Set flag to true once userId is determined
+                    console.log("Firebase initialized and user ID set:", userId);
+                    
+                    // Enable process button ONLY when Auth is definitely ready
                     document.getElementById('processButton').disabled = false;
+                    
+                    unsubscribe(); // Stop listening after the first state change
                 });
+
             } catch (e) {
                 console.error("Firebase Initialization Error:", e);
                 document.getElementById('errorMessage').textContent = 'Cannot initialize Firebase/Auth: ' + e.message;
@@ -328,7 +327,9 @@
 
         /** Calls the Gemini API with exponential backoff */
         const callGeminiAPI = async (base64Image, mimeType, prompt, maxRetries = 5) => {
+            // Gemini API Key ที่คุณระบุ
             const apiKey = "AIzaSyD4pDockyyUKft4kx6T4LCc5agKPmV7PNY"; 
+            
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
             // System prompt to guide the model's output structure
@@ -372,7 +373,11 @@
 
                     if (!response.ok) {
                         const errorBody = await response.json();
-                        throw new Error(`API failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`);
+                        let errorMessage = `API failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`;
+                        if (response.status === 403 && apiKey === "") {
+                             errorMessage += " (Possible missing API Key - Please check 'const apiKey' in the code.)";
+                        }
+                        throw new Error(errorMessage);
                     }
 
                     const result = await response.json();
@@ -420,17 +425,60 @@
                 }, 4000);
             }
         };
+
+        // --- Data Uploader ---
+        window.handleUpload = async () => {
+            const fileInput = document.getElementById('imageUpload');
+            const file = fileInput.files[0];
+            const loadingIndicator = document.getElementById('loading');
+            const errorArea = document.getElementById('errorArea');
+            const processButton = document.getElementById('processButton');
+            
+            // Re-check readiness just in case (though button should be disabled if not ready)
+            if (!isAuthReady) {
+                 showToast('⚠️ Firebase กำลังโหลด กรุณารอสักครู่', 'error');
+                 return;
+            }
+            
+            if (!file) {
+                showToast('⚠️ กรุณาเลือกไฟล์รูปภาพก่อน', 'error');
+                return;
+            }
+            
+            loadingIndicator.classList.remove('hidden');
+            errorArea.classList.add('hidden');
+            processButton.disabled = true;
+
+            try {
+                const base64Image = await convertFileToBase64(file);
+                
+                const prompt = "Extract all numerical values and text displays from the machine control panel screen into the required JSON structure. Pay close attention to the PNo value and the X/Y coordinates.";
+
+                const extractedData = await callGeminiAPI(base64Image, file.type, prompt);
+                
+                renderDataToTable(extractedData);
+                showToast('✅ ดึงข้อมูลสำเร็จ! กรุณาตรวจสอบและแก้ไขก่อนบันทึก', 'success');
+                
+            } catch (error) {
+                console.error("Image Processing Error:", error);
+                document.getElementById('errorMessage').textContent = error.message;
+                errorArea.classList.remove('hidden');
+                document.getElementById('saveButton').disabled = true;
+                showToast('❌ ดึงข้อมูลไม่สำเร็จ (ดู Console สำหรับรายละเอียด)', 'error');
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                processButton.disabled = false;
+            }
+        }
         
         // --- Data Renderer ---
         const renderDataToTable = (data) => {
             // Update Main Header Block (contenteditable spans use textContent)
-            // Note: machineNoSelect is NOT updated by API data, it must be selected manually.
             document.getElementById('programName').textContent = data.programName || '-- N/A --';
             document.getElementById('activePatternPNo').textContent = data.activePattern || '-- N/A --';
             document.getElementById('pNoValue').textContent = data.pNoValue !== undefined ? data.pNoValue : '-- N/A --';
 
             // Update Table Data (input fields use value)
-            // Use String() conversion for coordinates and settings to handle both string and number types correctly
             document.getElementById('coordX').value = data.coordX || 'X -- N/A --';
             document.getElementById('coordY').value = data.coordY || 'Y -- N/A --';
             document.getElementById('setting1').value = data.setting1 !== undefined ? String(data.setting1) : '-- N/A --';
@@ -453,7 +501,7 @@
                 activePatternDisplay.classList.remove('bg-green-500', 'border-green-700');
             }
 
-            // Enable Save button after successful rendering
+            // Enable Save button after successful rendering (isAuthReady flag guarantees Firebase variables are set)
             document.getElementById('saveButton').disabled = false;
         };
 
@@ -496,7 +544,7 @@
             const data = {
                 timestamp: new Date().toISOString(),
                 userId: userId,
-                machineNo: document.getElementById('machineNoSelect').value.trim(), // NEW FIELD
+                machineNo: document.getElementById('machineNoSelect').value.trim(), 
                 programName: document.getElementById('programName').textContent.trim(),
                 activePatternPNo: document.getElementById('activePatternPNo').textContent.trim(),
                 pNoValue: document.getElementById('pNoValue').textContent.trim(),
@@ -519,13 +567,6 @@
          * @returns {Promise<boolean>} - True if successful, false otherwise.
          */
         const sendDataToGoogleSheet = async (data) => {
-             // Check if the placeholder URL is used
-            if (APPS_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbxdlfxAqxwL0Nc1UdML-Z571OQQcFaERaTP4iiH0xYMbUSoLcxzRqtjCKNqiRea0OUW/exec') {
-                console.warn("APPS_SCRIPT_URL is not set. Skipping Google Sheet save.");
-                return false;
-            }
-
-            // Append the Spreadsheet ID to the data payload for the script to use
             const payload = { 
                 ...data, 
                 spreadsheetId: SPREADSHEET_ID 
@@ -534,7 +575,7 @@
             try {
                 const response = await fetch(APPS_SCRIPT_URL, {
                     method: 'POST',
-                    mode: 'cors', // Crucial for cross-origin requests to Apps Script
+                    mode: 'cors', 
                     cache: 'no-cache',
                     headers: {
                         'Content-Type': 'application/json',
@@ -561,6 +602,15 @@
             const data = collectCurrentData();
             const saveButton = document.getElementById('saveButton');
             
+            // CRITICAL CHECK: Use isAuthReady flag to prevent race condition
+            if (!db || !userId || !isAuthReady) {
+                // This message is now more helpful if it happens
+                showToast('⚠️ Firebase กำลังเตรียมข้อมูล กรุณารอแล้วลองอีกครั้ง', 'error');
+                console.error("Save failed: Firebase is not initialized or user ID is missing.");
+                saveButton.disabled = false;
+                return;
+            }
+
             // Check if machine number is selected
             if (data.machineNo === "") {
                  showToast('⚠️ กรุณาเลือกหมายเลขเครื่องจักร (Machine No.) ก่อนบันทึก', 'error');
@@ -576,16 +626,12 @@
             let sheetSuccess = false;
 
             try {
-                if (!db || !userId) {
-                    throw new Error("Firebase is not initialized or user ID is missing.");
-                }
-                
                 // 1. SAVE TO FIRESTORE
                 const collectionPath = `artifacts/${appId}/users/${userId}/juki_data`;
                 await addDoc(collection(db, collectionPath), data);
                 firestoreSuccess = true;
                 
-                // 2. SAVE TO GOOGLE SHEET (Asynchronously, using a promise to handle both)
+                // 2. SAVE TO GOOGLE SHEET
                 sheetSuccess = await sendDataToGoogleSheet(data);
                 
                 // Final confirmation
@@ -594,7 +640,6 @@
                 } else if (firestoreSuccess) {
                     showToast(`⚠️ บันทึก Firestore สำเร็จ แต่ Sheet ไม่สำเร็จ (ดู Console)`, 'info');
                 } else {
-                    // Should be caught by the general catch block, but added for safety
                     throw new Error("Firestore save failed.");
                 }
                 
@@ -609,60 +654,13 @@
                 }
                 saveButton.disabled = false;
             }
-        }
-
-        // --- Main Handler ---
-        window.handleUpload = async () => {
-            const fileInput = document.getElementById('imageUpload');
-            const file = fileInput.files[0];
-            
-            // UI elements
-            const loading = document.getElementById('loading');
-            const errorArea = document.getElementById('errorArea');
-            const processButton = document.getElementById('processButton');
-
-            if (!file) {
-                document.getElementById('errorMessage').textContent = 'กรุณาเลือกไฟล์รูปภาพก่อน';
-                errorArea.classList.remove('hidden');
-                return;
-            }
-
-            // Reset UI states
-            loading.classList.remove('hidden');
-            errorArea.classList.add('hidden');
-            processButton.disabled = true;
-            document.getElementById('saveButton').disabled = true;
-
-            try {
-                const mimeType = file.type;
-                if (!mimeType.startsWith('image/')) {
-                    throw new Error("ไฟล์ที่เลือกไม่ใช่รูปภาพ");
-                }
-                
-                const base64Image = await convertFileToBase64(file);
-                
-                const prompt = "Extract all required data points from the image.";
-
-                const extractedData = await callGeminiAPI(base64Image, mimeType, prompt);
-                
-                renderDataToTable(extractedData);
-
-            } catch (error) {
-                console.error("Extraction Error:", error);
-                document.getElementById('errorMessage').textContent = 'Error: ' + error.message;
-                errorArea.classList.remove('hidden');
-                // Optional: Render N/A if error occurs
-                renderDataToTable({}); 
-            } finally {
-                loading.classList.add('hidden');
-                processButton.disabled = false;
-            }
         };
 
         // Enable button when file is selected
         document.getElementById('imageUpload').addEventListener('change', (e) => {
             const processButton = document.getElementById('processButton');
-            processButton.disabled = e.target.files.length === 0;
+            // Only enable if auth is ready AND a file is selected
+            processButton.disabled = e.target.files.length === 0 || !isAuthReady; 
             if (e.target.files.length > 0) {
                  document.getElementById('errorArea').classList.add('hidden');
             }
@@ -673,6 +671,4 @@
     </script>
 
 </body>
-- [ ] </html>
-	
-	
+</html>
