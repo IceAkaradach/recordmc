@@ -347,9 +347,9 @@
         };
 
 
-        /** Calls the Gemini API with exponential backoff */
-        const callGeminiAPI = async (base64Image, mimeType, prompt, maxRetries = 5) => {
-            // Gemini API Key ที่คุณระบุ
+        /** Calls the Gemini  with exponential backoff */
+        const callGemini = async (base64Image, mimeType, prompt, maxRetries = 5) => {
+            // Gemini  Key ที่คุณระบุ
             const apiKey = "AIzaSyD4pDockyyUKft4kx6T4LCc5agKPmV7PNY"; 
             
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
