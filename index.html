@@ -261,7 +261,7 @@
         // *** GOOGLE SHEET CONFIGURATION ***
         const SPREADSHEET_ID = '1-um_NqLwpGn2paJ6xHnnGiFK23SMhHeH4I-I_lbVaio'; 
         // NOTE: กรุณาเปลี่ยน URL นี้เป็น URL ที่คุณ Deploy Google Apps Script Web App แล้ว
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyXNHKUffZYWkjpTGwVI2Sl4Ff-hJV1X7KpwmGCNQUM1_CLZUS_U-nRrxuNOdR2AnzE/exec'; // UPDATED URL
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyXNHKUffZYWkjpTGwVI2Sl4Ff-hJV1X7KpwmGCNQUM1_CLZUS_U-nRrxuNOdR2AnzE/exec'; 
 
         // Initialize Firebase and Authentication
         async function initializeAppAndAuth() {
@@ -348,10 +348,9 @@
         };
 
 
-        /** Calls the Gemini  with exponential backoff */
-        const callGemini = async (base64Image, mimeType, prompt, maxRetries = 5) => {
-            // NOTE: Setting Key to "" allows Canvas environment to inject its own key, 
-            // resolving 403 referer block errors when running within the iframe.
+        /** Calls the Gemini API with exponential backoff */
+        const callGeminiAPI = async (base64Image, mimeType, prompt, maxRetries = 5) => {
+            // UPDATED: ใช้ API Key ที่ผู้ใช้ระบุมา
             const apiKey = "AIzaSyD4pDockyyUKft4kx6T4LCc5agKPmV7PNY"; 
             
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
