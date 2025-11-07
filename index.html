@@ -243,11 +243,20 @@
 
         // Firebase mandatory global variables
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        // ตรวจสอบและให้ค่าเริ่มต้นของ Config อย่างปลอดภัย
+        let firebaseConfig = {};
+        try {
+            if (typeof __firebase_config !== 'undefined') {
+                firebaseConfig = JSON.parse(__firebase_config);
+            }
+        } catch (e) {
+            console.error("Failed to parse __firebase_config:", e);
+        }
+        
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         let db, auth, userId = null;
-        let isAuthReady = false; // NEW: Flag เพื่อตรวจสอบความพร้อมของ Firebase
+        let isAuthReady = false; 
 
         // *** GOOGLE SHEET CONFIGURATION ***
         const SPREADSHEET_ID = '1-um_NqLwpGn2paJ6xHnnGiFK23SMhHeH4I-I_lbVaio'; 
@@ -256,7 +265,20 @@
         // Initialize Firebase and Authentication
         async function initializeAppAndAuth() {
             try {
-                const app = initializeApp(firebaseConfig);
+                // 1. Initialize App: ใช้ Config หากมี แต่ถ้าไม่มี projectId จะไม่เรียก initializeApp เพื่อป้องกัน error
+                let app = null;
+                if (firebaseConfig && firebaseConfig.projectId) {
+                    app = initializeApp(firebaseConfig);
+                } else {
+                    console.warn("Firebase Config missing Project ID. Skipping firestore initialization and using only anonymous ID.");
+                    // Set Auth Ready and generate temp ID immediately if config is missing
+                    userId = crypto.randomUUID(); 
+                    isAuthReady = true;
+                    document.getElementById('processButton').disabled = false;
+                    return; // Exit if Firebase cannot be initialized
+                }
+
+                // 2. Initialize Auth and Firestore if App is initialized
                 db = getFirestore(app);
                 auth = getAuth(app);
 
@@ -266,12 +288,12 @@
                     await signInAnonymously(auth);
                 }
 
-                // Wait for the user state to be determined
+                // 3. Wait for the user state to be determined
                 const unsubscribe = onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
                     } else {
-                        // Fallback to random UUID if anonymous sign-in failed or is pending
+                        // Fallback to random UUID if sign-in failed
                         userId = crypto.randomUUID(); 
                     }
                     
@@ -602,11 +624,10 @@
             const data = collectCurrentData();
             const saveButton = document.getElementById('saveButton');
             
-            // CRITICAL CHECK: Use isAuthReady flag to prevent race condition
-            if (!db || !userId || !isAuthReady) {
-                // This message is now more helpful if it happens
-                showToast('⚠️ Firebase กำลังเตรียมข้อมูล กรุณารอแล้วลองอีกครั้ง', 'error');
-                console.error("Save failed: Firebase is not initialized or user ID is missing.");
+            // CRITICAL CHECK: Check if Firestore is even possible/initialized
+            if (!isAuthReady) {
+                showToast('⚠️ ระบบยังไม่พร้อม กรุณารอแล้วลองอีกครั้ง', 'error');
+                console.error("Save failed: Auth is not ready.");
                 saveButton.disabled = false;
                 return;
             }
@@ -626,21 +647,30 @@
             let sheetSuccess = false;
 
             try {
-                // 1. SAVE TO FIRESTORE
-                const collectionPath = `artifacts/${appId}/users/${userId}/juki_data`;
-                await addDoc(collection(db, collectionPath), data);
-                firestoreSuccess = true;
+                // 1. SAVE TO FIRESTORE (Only attempt if db object exists)
+                if (db) {
+                    const collectionPath = `artifacts/${appId}/users/${userId}/juki_data`;
+                    await addDoc(collection(db, collectionPath), data);
+                    firestoreSuccess = true;
+                } else {
+                    console.warn("Firestore initialization skipped due to missing config. Only saving to Google Sheet.");
+                    firestoreSuccess = true; // Mark as successful for the UI, since we skipped it intentionally
+                }
                 
                 // 2. SAVE TO GOOGLE SHEET
                 sheetSuccess = await sendDataToGoogleSheet(data);
                 
                 // Final confirmation
-                if (firestoreSuccess && sheetSuccess) {
-                    showToast(`✅ บันทึกสำเร็จ! (Firestore & Sheet)`, 'success');
-                } else if (firestoreSuccess) {
+                if (sheetSuccess) {
+                    if (db) {
+                        showToast(`✅ บันทึกสำเร็จ! (Firestore & Sheet)`, 'success');
+                    } else {
+                        showToast(`✅ บันทึกสำเร็จ! (บันทึกเฉพาะ Google Sheet)`, 'success');
+                    }
+                } else if (firestoreSuccess && db) {
                     showToast(`⚠️ บันทึก Firestore สำเร็จ แต่ Sheet ไม่สำเร็จ (ดู Console)`, 'info');
                 } else {
-                    throw new Error("Firestore save failed.");
+                    throw new Error("Save failed completely. Neither Firestore nor Sheet was successful.");
                 }
                 
             } catch (error) {
