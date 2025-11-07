@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เครื่องมือดึงข้อมูลจากรูปภาพ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ตั้งค่าฟอนต์หลักเป็น Inter หรือฟอนต์ Sans-serif อื่น ๆ */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        /* Style for editable spans in header for better visibility */
+        .editable-span {
+            min-width: 100px; /* Ensures space when empty */
+            display: inline-block;
+            border-bottom: 2px dotted transparent;
+            cursor: text;
+        }
+        .editable-span:focus {
+            outline: none;
+            border-bottom: 2px dotted #4f46e5;
+        }
+        /* Style for editable input fields inside the table */
+        .editable-input {
+            width: 100%;
+            background-color: transparent;
+            border: none;
+            padding: 0;
+            margin: 0;
+            line-height: inherit;
+            box-shadow: none;
+            outline: none;
+            transition: all 0.1s;
+        }
+        .editable-input:focus {
+            background-color: #fffbeb; /* Light yellow background when focused */
+            box-shadow: 0 0 0 1px #a78bfa inset;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-4xl mx-auto bg-white shadow-xl rounded-xl p-6 md:p-10">
+
+        <!-- หัวข้อและคำแนะนำ -->
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">เครื่องมือดึงข้อมูลจากรูปภาพ</h1>
+        <p class="text-lg text-indigo-600 mb-6 border-b pb-4">อัปโหลดรูปภาพแผงควบคุมเพื่อดึงค่า, แก้ไข, และบันทึกข้อมูล</p>
+
+        <!-- ส่วนสำหรับอัปโหลดและประมวลผล -->
+        <div class="space-y-4 mb-8 p-4 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+            <!-- File Input -->
+            <input type="file" id="imageUpload" accept="image/*" class="block w-full text-sm text-gray-500
+                file:mr-4 file:py-2 file:px-4
+                file:rounded-full file:border-0
+                file:text-sm file:font-semibold
+                file:bg-indigo-50 file:text-indigo-700
+                hover:file:bg-indigo-100" />
+            
+            <!-- Process Button -->
+            <button id="processButton" onclick="handleUpload()" disabled
+                class="w-full py-3 px-4 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150 ease-in-out disabled:bg-gray-400 disabled:cursor-not-allowed">
+                ดึงข้อมูลจากรูปภาพ
+            </button>
+            
+        </div>
+
+        <!-- Loading Indicator & Error Area -->
+        <div id="loading" class="hidden text-center p-4 bg-yellow-100 rounded-lg text-yellow-700 font-medium mb-6">
+            <p>กำลังประมวลผล... กรุณารอสักครู่ (อาจใช้เวลา 5-10 วินาที)</p>
+        </div>
+        
+        <div id="errorArea" class="hidden mb-6 p-4 bg-red-100 border border-red-300 rounded-lg text-red-700 font-medium">
+            <p>⚠️ เกิดข้อผิดพลาดในการประมวลผล</p>
+            <p id="errorMessage" class="text-sm mt-1"></p>
+        </div>
+        
+        <!-- Instruction Area for Google Sheet Setup -->
+        <div id="sheetInstruction" class="mt-4 mb-6 p-3 bg-red-50 rounded-lg border border-red-300 text-sm">
+            <div class="font-bold text-red-700 mb-1">🚨 คำเตือน: การเชื่อมต่อ Google Sheet</div>
+            <p class="text-red-600">กรุณาตั้งค่า Google Apps Script Web App และนำ URL มาใส่ในตัวแปร **`APPS_SCRIPT_URL`** ในส่วน JavaScript ด้านล่างเพื่อใช้งานการบันทึกอัตโนมัติ (ดูคำแนะนำในไฟล์ `google_sheet_setup.md`).</p>
+        </div>
+
+
+        <!-- NEW BLOCK: Machine No. Selector -->
+        <div class="mb-8 p-4 bg-purple-50 rounded-lg border border-purple-200 shadow-inner">
+            <label for="machineNoSelect" class="block text-center font-bold text-lg text-purple-700 mb-2">เลือกหมายเลขเครื่องจักร (Machine No.)</label>
+            <select id="machineNoSelect" class="w-full p-3 border border-purple-300 rounded-lg shadow-sm focus:ring-purple-500 focus:border-purple-500 text-xl font-bold text-center">
+                <option value="" disabled selected>-- กรุณาเลือก Machine No. --</option>
+                <option value="SC001">SC001</option>
+                <option value="SC002">SC002</option>
+                <option value="SC003">SC003</option>
+                <option value="SC004">SC004</option>
+                <option value="SC005">SC005</option>
+                <option value="SC006">SC006</option>
+                <option value="SC007">SC007</option>
+                <option value="SC008">SC008</option>
+                <option value="SC009">SC009</option>
+                <option value="SC010">SC010</option>
+                <option value="SC011">SC011</option>
+                <option value="SC012">SC012</option>
+                <option value="SC013">SC013</option>
+                <option value="SC014">SC014</option>
+                <option value="SC015">SC015</option>
+                <option value="SC016">SC016</option>
+            </select>
+        </div>
+
+        <!-- ส่วนที่ 1: ข้อมูลโปรแกรมหลักที่ดึงจากภาพ (Editable using contenteditable) -->
+        <div class="mb-8 bg-indigo-50 p-4 rounded-lg border border-indigo-200 shadow-inner">
+            <div class="text-center">
+                <p class="font-semibold text-sm text-gray-500 uppercase tracking-wider">ชื่อโปรแกรมที่ดึงได้</p>
+                <span id="programName" contenteditable="true" class="editable-span block text-3xl font-extrabold text-gray-700">-- N/A --</span>
+                <p class="text-base text-gray-600">
+                    <span id="activePatternPNo" contenteditable="true" class="editable-span font-bold">-- N/A --</span> : 
+                    <span id="pNoValue" contenteditable="true" class="editable-span">-- N/A --</span>
+                </p>
+            </div>
+        </div>
+
+        <!-- ส่วนที่ 2: ตารางแสดงรายละเอียดการตั้งค่า -->
+        <div class="space-y-6">
+            <h2 class="text-2xl font-semibold text-gray-700 border-b-2 pb-2">รายละเอียดการตั้งค่าและพิกัด</h2>
+
+            <div class="overflow-x-auto rounded-lg shadow-md">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">หมวดหมู่</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">รายการข้อมูล</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ค่าที่ดึงจากภาพ (แก้ไขได้)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        <!-- พิกัด X -->
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">พิกัด</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-gray-600">พิกัด X</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <input type="text" id="coordX" class="editable-input text-green-600 font-mono" value="X -- N/A --">
+                            </td>
+                        </tr>
+                        <!-- พิกัด Y -->
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">พิกัด</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-gray-600">พิกัด Y</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <input type="text" id="coordY" class="editable-input text-green-600 font-mono" value="Y -- N/A --">
+                            </td>
+                        </tr>
+                        <!-- การตั้งค่า 1 -->
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">การตั้งค่า</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-gray-600">ค่าการตั้งค่า 1 ($\downarrow$ Icon)</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <input type="text" id="setting1" class="editable-input text-blue-600 font-mono" value="-- N/A --">
+                            </td>
+                        </tr>
+                        <!-- การตั้งค่า 2 -->
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">การตั้งค่า</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-gray-600">ค่าการตั้งค่า 2 (Icon 50)</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <input type="text" id="setting2" class="editable-input text-blue-600 font-mono" value="-- N/A --">
+                            </td>
+                        </tr>
+                        <!-- การตั้งค่า 3 -->
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">การตั้งค่า</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-gray-600">ค่าการตั้งค่า 3 (Icon 800)</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <input type="text" id="setting3" class="editable-input text-blue-600 font-mono" value="-- N/A --">
+                            </td>
+                        </tr>
+                        <!-- การตั้งค่า 4 -->
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">การตั้งค่า</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-gray-600">ค่าการตั้งค่า 4 ($\downarrow$ Icon 35)</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <input type="text" id="setting4" class="editable-input text-blue-600 font-mono" value="-- N/A --">
+                            </td>
+                        </tr>
+                        <!-- การตั้งค่า 5 -->
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">การตั้งค่า</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-gray-600">ค่าการตั้งค่า 5 (Icon 0.0)</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <input type="text" id="setting5" class="editable-input text-blue-600 font-mono" value="-- N/A --">
+                            </td>
+                        </tr>
+                        <!-- การตั้งค่า 6 -->
+                        <tr class="bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">การตั้งค่า</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-gray-600">ค่าการตั้งค่า 6 (Icon 0.0)</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <input type="text" id="setting6" class="editable-input text-blue-600 font-mono" value="-- N/A --">
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- ส่วนที่ 3: รายการแพทเทิร์นที่กำลังใช้งาน (แสดงเฉพาะ Active Pattern) -->
+            <div class="mt-8">
+                <h2 class="text-2xl font-semibold text-gray-700 border-b-2 pb-2 mb-4">แพทเทิร์นที่กำลังใช้งาน (Active Pattern)</h2>
+                <div class="flex flex-wrap gap-3 p-4 bg-gray-100 rounded-lg justify-center">
+                    <!-- แสดงเฉพาะแพทเทิร์นที่ Active -->
+                    <span id="activePatternDisplay" contenteditable="true" class="editable-span px-4 py-2 text-xl bg-gray-400 text-white font-bold rounded-lg shadow-xl border-4 border-gray-500">
+                        -- N/A --
+                    </span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Action Buttons (Save and Clear) moved to the bottom -->
+        <div class="flex space-x-4 pt-6 mt-6 border-t border-gray-200">
+            <button id="saveButton" onclick="handleSave()" disabled
+                class="w-1/2 py-3 px-4 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition duration-150 ease-in-out disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v8a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-4 0V4m0 3h-4m4 0h4m-4 0v3m-4 0h4m-4 0h4"></path></svg>
+                บันทึกข้อมูล (Save)
+            </button>
+            <button id="clearButton" onclick="clearDataFields()" 
+                class="w-1/2 py-3 px-4 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition duration-150 ease-in-out">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                ล้างข้อมูล (Clear)
+            </button>
+        </div>
+        
+        <!-- คำแนะนำการใช้งาน -->
+        <div class="mt-4 pt-4 border-t border-gray-200">
+             <p class="text-sm text-gray-500">
+                💡 **หมายเหตุ:** ข้อมูลจะถูกบันทึกในฐานข้อมูล Firestore ส่วนตัวของคุณ **และ** ส่งไปยัง Google Sheet ที่กำหนดหากตั้งค่า Web App แล้ว
+            </p>
+        </div>
+
+    </div>
+    
+    <!-- Floating Toast Notification (Pop-up confirmation) -->
+    <div id="toastNotification" class="fixed bottom-4 right-4 z-50 p-4 rounded-lg shadow-2xl transition-opacity duration-300 opacity-0 pointer-events-none text-white font-semibold transform translate-y-full">
+        <p id="toastMessage"></p>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase mandatory global variables
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth, userId = null;
+
+        // *** GOOGLE SHEET CONFIGURATION ***
+        // 1. Google Sheet ID ของคุณ (ที่คุณให้มา)
+        const SPREADSHEET_ID = '1-um_NqLwpGn2paJ6xHnnGiFK23SMhHeH4I-I_lbVaio'; 
+        // 2. URL ของ Google Apps Script Web App (ต้องตั้งค่า Web App ก่อนใช้งาน)
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxdlfxAqxwL0Nc1UdML-Z571OQQcFaERaTP4iiH0xYMbUSoLcxzRqtjCKNqiRea0OUW/exec'; // <-- ต้องเปลี่ยนเป็น URL จริงของคุณ
+
+        // Initialize Firebase and Authentication
+        async function initializeAppAndAuth() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Firebase initialized and user signed in:", userId);
+                    } else {
+                        userId = crypto.randomUUID();
+                        console.log("Firebase initialized and using anonymous ID:", userId);
+                    }
+                    // Enable process button only after auth is ready
+                    document.getElementById('processButton').disabled = false;
+                });
+            } catch (e) {
+                console.error("Firebase Initialization Error:", e);
+                document.getElementById('errorMessage').textContent = 'Cannot initialize Firebase/Auth: ' + e.message;
+                document.getElementById('errorArea').classList.remove('hidden');
+            }
+        }
+
+        /** Converts a File object to a Base64 string */
+        const convertFileToBase64 = (file) => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => {
+                    // Extracting the Base64 data part
+                    const base64String = reader.result.split(',')[1];
+                    resolve(base64String);
+                };
+                reader.onerror = (error) => reject(error);
+            });
+        };
+        
+        // JSON Schema for structured output
+        const outputSchema = {
+            type: "OBJECT",
+            properties: {
+                programName: { type: "STRING", description: "The main program code, e.g., RG21 RBPU LEK2" },
+                pNoValue: { type: "NUMBER", description: "The large number associated with the active pattern, e.g., 286" },
+                coordX: { type: "STRING", description: "The X coordinate and scale, formatted as 'X 497.4 (100.0%)'" },
+                coordY: { type: "STRING", description: "The Y coordinate and scale, formatted as 'Y 343.6 (100.0%)'" },
+                setting1: { type: "NUMBER", description: "The first setting value, e.g., 258" },
+                setting2: { type: "NUMBER", description: "The second setting value, e.g., 50" },
+                setting3: { type: "NUMBER", description: "The third setting value, e.g., 800" },
+                setting4: { type: "NUMBER", description: "The fourth setting value, e.g., 35" },
+                setting5: { type: "NUMBER", description: "The fifth setting value, e.g., 0.0" },
+                setting6: { type: "NUMBER", description: "The sixth setting value, e.g., 0.0" },
+                activePattern: { type: "STRING", description: "The active pattern number, e.g., P25" }
+            },
+            required: ["programName", "pNoValue", "coordX", "coordY", "setting1", "setting2", "setting3", "setting4", "setting5", "setting6", "activePattern"]
+        };
+
+
+        /** Calls the Gemini API with exponential backoff */
+        const callGeminiAPI = async (base64Image, mimeType, prompt, maxRetries = 5) => {
+            const apiKey = ""; 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            // System prompt to guide the model's output structure
+            const systemPrompt = "You are an expert data extraction assistant. Analyze the machine control panel image. Extract the main program name, the PNo value (the large number), the X and Y coordinate displays (including scale), the six major numerical setting values (258, 50, 800, 35, 0.0, 0.0), and the active pattern name (e.g., P25). Respond strictly in the required JSON format.";
+
+            const payload = {
+                contents: [{
+                    role: "user",
+                    parts: [
+                        { text: prompt },
+                        {
+                            inlineData: {
+                                mimeType: mimeType,
+                                data: base64Image
+                            }
+                        }
+                    ]
+                }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: outputSchema
+                }
+            };
+
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.status === 429 && i < maxRetries - 1) {
+                        const delay = Math.pow(2, i) * 1000; // Exponential backoff
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue; // Retry
+                    }
+
+                    if (!response.ok) {
+                        const errorBody = await response.json();
+                        throw new Error(`API failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`);
+                    }
+
+                    const result = await response.json();
+                    const jsonString = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (!jsonString) {
+                         throw new Error("API response was empty or malformed.");
+                    }
+                    
+                    return JSON.parse(jsonString);
+
+                } catch (error) {
+                    if (i === maxRetries - 1) {
+                        throw error;
+                    }
+                }
+            }
+        };
+
+        // --- Toast Handler (The "Pop-up" message) ---
+        const showToast = (message, type) => {
+            const toast = document.getElementById('toastNotification');
+            const toastMessage = document.getElementById('toastMessage');
+            
+            toastMessage.textContent = message;
+            
+            // Set colors based on type
+            toast.classList.remove('bg-green-600', 'bg-red-600', 'bg-blue-600');
+            if (type === 'success') {
+                toast.classList.add('bg-green-600');
+            } else if (type === 'error') {
+                toast.classList.add('bg-red-600');
+            } else { // info/loading
+                toast.classList.add('bg-blue-600');
+            }
+
+            // Show toast (slide up and fade in)
+            toast.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-full');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            // Hide toast after 4 seconds for success/error
+            if (type !== 'info') {
+                 setTimeout(() => {
+                    toast.classList.remove('opacity-100', 'translate-y-0');
+                    toast.classList.add('opacity-0', 'pointer-events-none', 'translate-y-full');
+                }, 4000);
+            }
+        };
+        
+        // --- Data Renderer ---
+        const renderDataToTable = (data) => {
+            // Update Main Header Block (contenteditable spans use textContent)
+            // Note: machineNoSelect is NOT updated by API data, it must be selected manually.
+            document.getElementById('programName').textContent = data.programName || '-- N/A --';
+            document.getElementById('activePatternPNo').textContent = data.activePattern || '-- N/A --';
+            document.getElementById('pNoValue').textContent = data.pNoValue !== undefined ? data.pNoValue : '-- N/A --';
+
+            // Update Table Data (input fields use value)
+            // Use String() conversion for coordinates and settings to handle both string and number types correctly
+            document.getElementById('coordX').value = data.coordX || 'X -- N/A --';
+            document.getElementById('coordY').value = data.coordY || 'Y -- N/A --';
+            document.getElementById('setting1').value = data.setting1 !== undefined ? String(data.setting1) : '-- N/A --';
+            document.getElementById('setting2').value = data.setting2 !== undefined ? String(data.setting2) : '-- N/A --';
+            document.getElementById('setting3').value = data.setting3 !== undefined ? String(data.setting3) : '-- N/A --';
+            document.getElementById('setting4').value = data.setting4 !== undefined ? String(data.setting4) : '-- N/A --';
+            document.getElementById('setting5').value = data.setting5 !== undefined ? String(data.setting5) : '-- N/A --';
+            document.getElementById('setting6').value = data.setting6 !== undefined ? String(data.setting6) : '-- N/A --';
+            
+            // Update Active Pattern Display (contenteditable span uses textContent)
+            const activePatternDisplay = document.getElementById('activePatternDisplay');
+            activePatternDisplay.textContent = data.activePattern ? `${data.activePattern} (Active)` : '-- N/A --';
+            
+            // Update styling based on data availability
+            if (data.activePattern) {
+                activePatternDisplay.classList.remove('bg-gray-400', 'border-gray-500');
+                activePatternDisplay.classList.add('bg-green-500', 'border-green-700');
+            } else {
+                activePatternDisplay.classList.add('bg-gray-400', 'border-gray-500');
+                activePatternDisplay.classList.remove('bg-green-500', 'border-green-700');
+            }
+
+            // Enable Save button after successful rendering
+            document.getElementById('saveButton').disabled = false;
+        };
+
+        // --- Data Clearer ---
+        window.clearDataFields = () => {
+            // Clear Machine No. dropdown
+            document.getElementById('machineNoSelect').value = ""; 
+            
+            // Clear spans (contenteditable)
+            document.getElementById('programName').textContent = '-- N/A --';
+            document.getElementById('activePatternPNo').textContent = '-- N/A --';
+            document.getElementById('pNoValue').textContent = '-- N/A --';
+
+            // Clear inputs (value)
+            document.getElementById('coordX').value = 'X -- N/A --';
+            document.getElementById('coordY').value = 'Y -- N/A --';
+            document.getElementById('setting1').value = '-- N/A --';
+            document.getElementById('setting2').value = '-- N/A --';
+            document.getElementById('setting3').value = '-- N/A --';
+            document.getElementById('setting4').value = '-- N/A --';
+            document.getElementById('setting5').value = '-- N/A --';
+            document.getElementById('setting6').value = '-- N/A --';
+            
+            // Clear active pattern display and styling
+            const activePatternDisplay = document.getElementById('activePatternDisplay');
+            activePatternDisplay.textContent = '-- N/A --';
+            activePatternDisplay.classList.add('bg-gray-400', 'border-gray-500');
+            activePatternDisplay.classList.remove('bg-green-500', 'border-green-700');
+
+            // Disable Save button
+            document.getElementById('saveButton').disabled = true;
+            
+            // Show toast
+            showToast('🗑️ ข้อมูลถูกล้างเรียบร้อยแล้ว', 'info');
+        }
+
+        // --- Data Collector ---
+        const collectCurrentData = () => {
+            // Collect data from Machine No. dropdown and other fields
+            const data = {
+                timestamp: new Date().toISOString(),
+                userId: userId,
+                machineNo: document.getElementById('machineNoSelect').value.trim(), // NEW FIELD
+                programName: document.getElementById('programName').textContent.trim(),
+                activePatternPNo: document.getElementById('activePatternPNo').textContent.trim(),
+                pNoValue: document.getElementById('pNoValue').textContent.trim(),
+                coordX: document.getElementById('coordX').value.trim(),
+                coordY: document.getElementById('coordY').value.trim(),
+                setting1: document.getElementById('setting1').value.trim(),
+                setting2: document.getElementById('setting2').value.trim(),
+                setting3: document.getElementById('setting3').value.trim(),
+                setting4: document.getElementById('setting4').value.trim(),
+                setting5: document.getElementById('setting5').value.trim(),
+                setting6: document.getElementById('setting6').value.trim(),
+                activePatternDisplay: document.getElementById('activePatternDisplay').textContent.trim()
+            };
+            return data;
+        }
+
+        /**
+         * Sends data to the deployed Google Apps Script Web App.
+         * @param {object} data - The data object to send.
+         * @returns {Promise<boolean>} - True if successful, false otherwise.
+         */
+        const sendDataToGoogleSheet = async (data) => {
+             // Check if the placeholder URL is used
+            if (APPS_SCRIPT_URL === 'YOUR_DEPLOYED_APPS_SCRIPT_URL_HERE') {
+                console.warn("APPS_SCRIPT_URL is not set. Skipping Google Sheet save.");
+                return false;
+            }
+
+            // Append the Spreadsheet ID to the data payload for the script to use
+            const payload = { 
+                ...data, 
+                spreadsheetId: SPREADSHEET_ID 
+            };
+            
+            try {
+                const response = await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'cors', // Crucial for cross-origin requests to Apps Script
+                    cache: 'no-cache',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`Google Sheet API failed with status ${response.status}. Response: ${text.substring(0, 100)}`);
+                }
+                
+                return true;
+
+            } catch (error) {
+                console.error("Google Sheet Save Error:", error);
+                showToast(`❌ บันทึก Sheet ไม่สำเร็จ: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // --- Data Saver (Firestore & Google Sheet) ---
+        window.handleSave = async () => {
+            const data = collectCurrentData();
+            const saveButton = document.getElementById('saveButton');
+            
+            // Check if machine number is selected
+            if (data.machineNo === "") {
+                 showToast('⚠️ กรุณาเลือกหมายเลขเครื่องจักร (Machine No.) ก่อนบันทึก', 'error');
+                 return;
+            }
+            
+            saveButton.disabled = true;
+            
+            // Show "saving" status using the toast
+            showToast('กำลังบันทึกข้อมูล...', 'info'); 
+
+            let firestoreSuccess = false;
+            let sheetSuccess = false;
+
+            try {
+                if (!db || !userId) {
+                    throw new Error("Firebase is not initialized or user ID is missing.");
+                }
+                
+                // 1. SAVE TO FIRESTORE
+                const collectionPath = `artifacts/${appId}/users/${userId}/juki_data`;
+                await addDoc(collection(db, collectionPath), data);
+                firestoreSuccess = true;
+                
+                // 2. SAVE TO GOOGLE SHEET (Asynchronously, using a promise to handle both)
+                sheetSuccess = await sendDataToGoogleSheet(data);
+                
+                // Final confirmation
+                if (firestoreSuccess && sheetSuccess) {
+                    showToast(`✅ บันทึกสำเร็จ! (Firestore & Sheet)`, 'success');
+                } else if (firestoreSuccess) {
+                    showToast(`⚠️ บันทึก Firestore สำเร็จ แต่ Sheet ไม่สำเร็จ (ดู Console)`, 'info');
+                } else {
+                    // Should be caught by the general catch block, but added for safety
+                    throw new Error("Firestore save failed.");
+                }
+                
+            } catch (error) {
+                console.error("General Save Error:", error);
+                showToast(`❌ บันทึกไม่สำเร็จ: ${error.message}`, 'error');
+            } finally {
+                // Ensure toast is cleared/reset if it was the 'info' saving toast
+                if (document.getElementById('toastNotification').classList.contains('bg-blue-600')) {
+                    document.getElementById('toastNotification').classList.remove('opacity-100', 'translate-y-0');
+                    document.getElementById('toastNotification').classList.add('opacity-0', 'pointer-events-none', 'translate-y-full');
+                }
+                saveButton.disabled = false;
+            }
+        }
+
+        // --- Main Handler ---
+        window.handleUpload = async () => {
+            const fileInput = document.getElementById('imageUpload');
+            const file = fileInput.files[0];
+            
+            // UI elements
+            const loading = document.getElementById('loading');
+            const errorArea = document.getElementById('errorArea');
+            const processButton = document.getElementById('processButton');
+
+            if (!file) {
+                document.getElementById('errorMessage').textContent = 'กรุณาเลือกไฟล์รูปภาพก่อน';
+                errorArea.classList.remove('hidden');
+                return;
+            }
+
+            // Reset UI states
+            loading.classList.remove('hidden');
+            errorArea.classList.add('hidden');
+            processButton.disabled = true;
+            document.getElementById('saveButton').disabled = true;
+
+            try {
+                const mimeType = file.type;
+                if (!mimeType.startsWith('image/')) {
+                    throw new Error("ไฟล์ที่เลือกไม่ใช่รูปภาพ");
+                }
+                
+                const base64Image = await convertFileToBase64(file);
+                
+                const prompt = "Extract all required data points from the image.";
+
+                const extractedData = await callGeminiAPI(base64Image, mimeType, prompt);
+                
+                renderDataToTable(extractedData);
+
+            } catch (error) {
+                console.error("Extraction Error:", error);
+                document.getElementById('errorMessage').textContent = 'Error: ' + error.message;
+                errorArea.classList.remove('hidden');
+                // Optional: Render N/A if error occurs
+                renderDataToTable({}); 
+            } finally {
+                loading.classList.add('hidden');
+                processButton.disabled = false;
+            }
+        };
+
+        // Enable button when file is selected
+        document.getElementById('imageUpload').addEventListener('change', (e) => {
+            const processButton = document.getElementById('processButton');
+            processButton.disabled = e.target.files.length === 0;
+            if (e.target.files.length > 0) {
+                 document.getElementById('errorArea').classList.add('hidden');
+            }
+        });
+        
+        // Start initialization
+        initializeAppAndAuth();
+    </script>
+
+</body>
+- [ ] </html>
+	
+	
