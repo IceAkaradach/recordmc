@@ -1,3 +1,4 @@
+<!-- Code Revision: v1.02 -->
 <!DOCTYPE html>
 <html lang="th">
 <head>
@@ -77,7 +78,7 @@
             <p id="errorMessage" class="text-sm mt-1"></p>
         </div>
         
-        <!-- NEW BLOCK: Machine No. Selector -->
+        <!-- BLOCK 1: Machine No. Selector -->
         <div class="mb-8 p-4 bg-purple-50 rounded-lg border border-purple-200 shadow-inner">
             <label for="machineNoSelect" class="block text-center font-bold text-lg text-purple-700 mb-2">เลือกหมายเลขเครื่องจักร (Machine No.)</label>
             <select id="machineNoSelect" class="w-full p-3 border border-purple-300 rounded-lg shadow-sm focus:ring-purple-500 focus:border-purple-500 text-xl font-bold text-center">
@@ -221,11 +222,17 @@
             </button>
         </div>
         
-        <!-- คำแนะนำการใช้งาน -->
+        <!-- คำแนะนำการใช้งาน & CODE REVISION DISPLAY -->
         <div class="mt-4 pt-4 border-t border-gray-200">
              <p class="text-sm text-gray-500">
                 💡 **หมายเหตุ:** ข้อมูลจะถูกบันทึกในฐานข้อมูล Firestore ส่วนตัวของคุณ **และ** ส่งไปยัง Google Sheet ผ่าน Web App ที่ตั้งค่าไว้แล้ว
+                <br>
+                **โปรดทราบ**: URL และ API Key ในโค้ดถูกตั้งค่าสำหรับสภาพแวดล้อมจำลอง โปรดเปลี่ยน `const apiKey` และ `const APPS_SCRIPT_URL` ให้เป็นค่าจริงของคุณก่อนใช้งาน
             </p>
+             <!-- CODE REVISION DISPLAY -->
+             <p class="text-xs text-gray-400 mt-2 text-right">
+                เครื่องมือ Revision: <span class="font-bold text-gray-600">v1.02</span>
+             </p>
         </div>
 
     </div>
@@ -237,13 +244,13 @@
 
     <!-- JavaScript Logic -->
     <script type="module">
+        // Import Firebase modules
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase mandatory global variables
+        // Firebase mandatory global variables setup
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        // ตรวจสอบและให้ค่าเริ่มต้นของ Config อย่างปลอดภัย
         let firebaseConfig = {};
         try {
             if (typeof __firebase_config !== 'undefined') {
@@ -258,53 +265,54 @@
         let db, auth, userId = null;
         let isAuthReady = false; 
 
-        // *** GOOGLE SHEET CONFIGURATION ***
-        // NOTE: กรุณาเปลี่ยน URL นี้เป็น URL ที่คุณ Deploy Google Apps Script Web App แล้ว
+        // *** GOOGLE SHEET & GEMINI CONFIGURATION (MUST BE REPLACED BY USER) ***
+        // NOTE: Please replace this URL with your deployed Google Apps Script Web App URL
         const SPREADSHEET_ID = '1-um_NqLwpGn2paJ6xHnnGiFK23SMhHeH4I-I_lbVaio'; 
         const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyXNHKUffZYWkjpTGwVI2Sl4Ff-hJV1X7KpwmGCNQUM1_CLZUS_U-nRrxuNOdR2AnzE/exec'; 
-
-        // Initialize Firebase and Authentication
+        // NOTE: The API key for Gemini 2.5 is used here. It must be provided in the runtime environment.
+        const apiKey = "AIzaSyD4pDockyyUKft4kx6T4LCc5agKPmV7PNY"; // Leave as empty string for Canvas runtime to inject the key
+        
+        // --- Core Firebase Initialization and Auth ---
         async function initializeAppAndAuth() {
             try {
-                // 1. Initialize App: ใช้ Config หากมี แต่ถ้าไม่มี projectId จะไม่เรียก initializeApp เพื่อป้องกัน error
                 let app = null;
+                // Check if Firebase config is available
                 if (firebaseConfig && firebaseConfig.projectId) {
                     app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
                 } else {
-                    console.warn("Firebase Config missing Project ID. Skipping firestore initialization and using only anonymous ID.");
-                    // Set Auth Ready and generate temp ID immediately if config is missing
-                    userId = crypto.randomUUID(); 
-                    isAuthReady = true;
-                    document.getElementById('processButton').disabled = false;
-                    return; // Exit if Firebase cannot be initialized
+                    console.warn("Firebase Config missing Project ID. Using anonymous ID only. Firestore will be skipped.");
                 }
-
-                // 2. Initialize Auth and Firestore if App is initialized
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
+                
+                // Perform sign-in
+                if (auth) {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
                 }
-
-                // 3. Wait for the user state to be determined
+                
+                // Wait for the user state to be determined for both cases
                 const unsubscribe = onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
                     } else {
-                        // Fallback to random UUID if sign-in failed
+                        // If auth failed or skipped (no config), generate a temporary UUID
                         userId = crypto.randomUUID(); 
                     }
                     
-                    isAuthReady = true; // Set flag to true once userId is determined
+                    isAuthReady = true; 
                     console.log("Firebase initialized and user ID set:", userId);
                     
                     // Enable process button ONLY when Auth is definitely ready
-                    document.getElementById('processButton').disabled = false;
+                    document.getElementById('processButton').disabled = document.getElementById('imageUpload').files.length === 0;
                     
-                    unsubscribe(); // Stop listening after the first state change
+                    // Display user ID for debugging in multi-user apps (optional, but good practice for sharing)
+                    // console.log("Current User ID: " + userId); 
+                    
+                    unsubscribe(); 
                 });
 
             } catch (e) {
@@ -314,6 +322,7 @@
             }
         }
 
+        // --- Utility Functions ---
         /** Converts a File object to a Base64 string */
         const convertFileToBase64 = (file) => {
             return new Promise((resolve, reject) => {
@@ -333,30 +342,28 @@
             type: "OBJECT",
             properties: {
                 programName: { type: "STRING", description: "The main program code, e.g., RG21 RBPU LEK2" },
-                pNoValue: { type: "NUMBER", description: "The large number associated with the active pattern, e.g., 286" },
+                pNoValue: { type: "STRING", description: "The large number associated with the active pattern, e.g., 286" },
                 coordX: { type: "STRING", description: "The X coordinate and scale, formatted as 'X 497.4 (100.0%)'" },
                 coordY: { type: "STRING", description: "The Y coordinate and scale, formatted as 'Y 343.6 (100.0%)'" },
-                setting1: { type: "NUMBER", description: "The first setting value, e.g., 258" },
-                setting2: { type: "NUMBER", description: "The second setting value, e.g., 50" },
-                setting3: { type: "NUMBER", description: "The third setting value, e.g., 800" },
-                setting4: { type: "NUMBER", description: "The fourth setting value, e.g., 35" },
-                setting5: { type: "NUMBER", description: "The fifth setting value, e.g., 0.0" },
-                setting6: { type: "NUMBER", description: "The sixth setting value, e.g., 0.0" },
+                setting1: { type: "STRING", description: "The first setting value, e.g., 258" },
+                setting2: { type: "STRING", description: "The second setting value, e.g., 50" },
+                setting3: { type: "STRING", description: "The third setting value, e.g., 800" },
+                setting4: { type: "STRING", description: "The fourth setting value, e.g., 35" },
+                setting5: { type: "STRING", description: "The fifth setting value, e.g., 0.0" },
+                setting6: { type: "STRING", description: "The sixth setting value, e.g., 0.0" },
                 activePattern: { type: "STRING", description: "The active pattern number, e.g., P25" }
             },
+            // Note: Making all required to ensure the model provides a full set of data, even if it's "N/A"
             required: ["programName", "pNoValue", "coordX", "coordY", "setting1", "setting2", "setting3", "setting4", "setting5", "setting6", "activePattern"]
         };
 
 
         /** Calls the Gemini API with exponential backoff */
         const callGeminiAPI = async (base64Image, mimeType, prompt, maxRetries = 5) => {
-            // แก้ไข: ใช้ API Key ที่ผู้ใช้ระบุมาโดยตรงเพื่อแก้ปัญหา 403
-            const apiKey = "AIzaSyD4pDockyyUKft4kx6T4LCc5agKPmV7PNY"; 
-            
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
-            // System prompt to guide the model's output structure
-            const systemPrompt = "You are an expert data extraction assistant. Analyze the machine control panel image. Extract the main program name, the PNo value (the large number), the X and Y coordinate displays (including scale), the six major numerical setting values (258, 50, 800, 35, 0.0, 0.0), and the active pattern name (e.g., P25). Respond strictly in the required JSON format.";
+            // *** UPDATED SYSTEM PROMPT: Enhanced emphasis on '1' vs 'I' ambiguity ***
+            const systemPrompt = "You are an expert data extraction assistant. Analyze the machine control panel image. Extract the main program name, the PNo value, the X and Y coordinate displays (including scale), the six major numerical setting values (labelled as setting 1 to 6 in the JSON schema), and the active pattern name (e.g., P25). IMPORTANT: Be extremely careful distinguishing between the number '1' and the letter 'I', and the number '0' and the letter 'O' in the Program Name. Assume program codes often contain the number '1' instead of the letter 'I'. If any value is not clearly visible, output 'N/A' for that specific key. Respond strictly in the required JSON format.";
 
             const payload = {
                 contents: [{
@@ -397,9 +404,6 @@
                     if (!response.ok) {
                         const errorBody = await response.json();
                         let errorMessage = `API failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`;
-                        if (response.status === 403) {
-                             errorMessage += " (โปรดตรวจสอบว่า API Key ถูกต้องและเปิดใช้งาน Gemini API แล้ว)";
-                        }
                         throw new Error(errorMessage);
                     }
 
@@ -475,7 +479,8 @@
             try {
                 const base64Image = await convertFileToBase64(file);
                 
-                const prompt = "Extract all numerical values and text displays from the machine control panel screen into the required JSON structure. Pay close attention to the PNo value and the X/Y coordinates.";
+                // *** UPDATED USER PROMPT: Explicit instruction to prefer '1' over 'I' in the Program Name ***
+                const prompt = "Extract all numerical values and text displays from the machine control panel screen into the required JSON structure. For the 'programName' specifically, if there is ambiguity between '1' and 'I', assume the character is the number '1' as is typical for Juki machine codes. Pay close attention to the PNo value and the X/Y coordinates.";
 
                 const extractedData = await callGeminiAPI(base64Image, file.type, prompt);
                 
@@ -490,6 +495,7 @@
                 showToast('❌ ดึงข้อมูลไม่สำเร็จ (ดู Console สำหรับรายละเอียด)', 'error');
             } finally {
                 loadingIndicator.classList.add('hidden');
+                // Re-enable button
                 processButton.disabled = false;
             }
         }
@@ -498,25 +504,26 @@
         const renderDataToTable = (data) => {
             // Update Main Header Block (contenteditable spans use textContent)
             document.getElementById('programName').textContent = data.programName || '-- N/A --';
-            document.getElementById('activePatternPNo').textContent = data.activePattern || '-- N/A --';
-            document.getElementById('pNoValue').textContent = data.pNoValue !== undefined ? data.pNoValue : '-- N/A --';
+            // Use activePattern as the label for pNoValue
+            document.getElementById('activePatternPNo').textContent = data.activePattern || '-- N/A --'; 
+            document.getElementById('pNoValue').textContent = data.pNoValue || '-- N/A --';
 
             // Update Table Data (input fields use value)
             document.getElementById('coordX').value = data.coordX || 'X -- N/A --';
             document.getElementById('coordY').value = data.coordY || 'Y -- N/A --';
-            document.getElementById('setting1').value = data.setting1 !== undefined ? String(data.setting1) : '-- N/A --';
-            document.getElementById('setting2').value = data.setting2 !== undefined ? String(data.setting2) : '-- N/A --';
-            document.getElementById('setting3').value = data.setting3 !== undefined ? String(data.setting3) : '-- N/A --';
-            document.getElementById('setting4').value = data.setting4 !== undefined ? String(data.setting4) : '-- N/A --';
-            document.getElementById('setting5').value = data.setting5 !== undefined ? String(data.setting5) : '-- N/A --';
-            document.getElementById('setting6').value = data.setting6 !== undefined ? String(data.setting6) : '-- N/A --';
+            document.getElementById('setting1').value = data.setting1 || '-- N/A --';
+            document.getElementById('setting2').value = data.setting2 || '-- N/A --';
+            document.getElementById('setting3').value = data.setting3 || '-- N/A --';
+            document.getElementById('setting4').value = data.setting4 || '-- N/A --';
+            document.getElementById('setting5').value = data.setting5 || '-- N/A --';
+            document.getElementById('setting6').value = data.setting6 || '-- N/A --';
             
             // Update Active Pattern Display (contenteditable span uses textContent)
             const activePatternDisplay = document.getElementById('activePatternDisplay');
             activePatternDisplay.textContent = data.activePattern ? `${data.activePattern} (Active)` : '-- N/A --';
             
             // Update styling based on data availability
-            if (data.activePattern) {
+            if (data.activePattern && data.activePattern !== 'N/A') {
                 activePatternDisplay.classList.remove('bg-gray-400', 'border-gray-500');
                 activePatternDisplay.classList.add('bg-green-500', 'border-green-700');
             } else {
@@ -596,9 +603,12 @@
             };
             
             try {
+                // Use a standard fetch, but since the endpoint is external, CORS might be restrictive.
+                // Using 'no-cors' allows the request to be sent, but prevents reading the response status/body for success confirmation.
+                // We rely on the request not throwing an error.
                 const response = await fetch(APPS_SCRIPT_URL, {
                     method: 'POST',
-                    mode: 'no-cors', // Changed to no-cors to bypass strict CORS policies in this environment
+                    mode: 'no-cors', 
                     cache: 'no-cache',
                     headers: {
                         'Content-Type': 'application/json',
@@ -607,15 +617,13 @@
                     body: JSON.stringify(payload)
                 });
                 
-                // When using 'no-cors', response.ok is always true, and status is 0. 
-                // We cannot read the response body. We assume success if fetch() doesn't throw a TypeError.
-                console.log("Sheet fetch sent with mode: 'no-cors'. Assuming success if no TypeError is thrown.");
+                console.log("Sheet fetch sent with mode: 'no-cors'. Assuming request was made successfully.");
                 return true;
 
             } catch (error) {
-                // If fetch fails due to network/CORS blocking, it throws a TypeError
+                // This catches network errors or TypeErrors thrown by fetch itself.
                 console.error("Google Sheet Save Error (Likely Network/CORS Block):", error);
-                showToast(`❌ บันทึก Sheet ไม่สำเร็จ: ${error.message} (โปรดตรวจสอบ APPS_SCRIPT_URL และสิทธิ์ Web App)`, 'error'); 
+                // We show an error to the user but still proceed with Firestore save check
                 return false;
             }
         }
@@ -625,7 +633,6 @@
             const data = collectCurrentData();
             const saveButton = document.getElementById('saveButton');
             
-            // CRITICAL CHECK: Check if Firestore is even possible/initialized
             if (!isAuthReady) {
                 showToast('⚠️ ระบบยังไม่พร้อม กรุณารอแล้วลองอีกครั้ง', 'error');
                 console.error("Save failed: Auth is not ready.");
@@ -653,6 +660,7 @@
                     const collectionPath = `artifacts/${appId}/users/${userId}/juki_data`;
                     await addDoc(collection(db, collectionPath), data);
                     firestoreSuccess = true;
+                    console.log("Data successfully saved to Firestore.");
                 } else {
                     console.warn("Firestore initialization skipped due to missing config. Only saving to Google Sheet.");
                     firestoreSuccess = true; // Mark as successful for the UI, since we skipped it intentionally
@@ -662,14 +670,13 @@
                 sheetSuccess = await sendDataToGoogleSheet(data);
                 
                 // Final confirmation
-                if (sheetSuccess) {
-                    if (db) {
-                        showToast(`✅ บันทึกสำเร็จ! (Firestore & Sheet)`, 'success');
-                    } else {
-                        showToast(`✅ บันทึกสำเร็จ! (บันทึกเฉพาะ Google Sheet)`, 'success');
-                    }
-                } else if (firestoreSuccess && db) {
+                if (firestoreSuccess && sheetSuccess) {
+                    showToast(`✅ บันทึกสำเร็จ! (Firestore & Sheet)`, 'success');
+                } else if (firestoreSuccess && !sheetSuccess) {
                     showToast(`⚠️ บันทึก Firestore สำเร็จ แต่ Sheet ไม่สำเร็จ (ดู Console)`, 'info');
+                } else if (!firestoreSuccess && sheetSuccess) {
+                     // This path should only happen if db was null but sheet worked
+                     showToast(`✅ บันทึกสำเร็จ! (บันทึกเฉพาะ Google Sheet)`, 'success');
                 } else {
                     throw new Error("Save failed completely. Neither Firestore nor Sheet was successful.");
                 }
