@@ -1,4 +1,4 @@
-<!-- Code Revision: v1.02 -->
+<!-- Code Revision: v1.03 - แก้ไขบั๊ก Firebase Auth Initialization -->
 <!DOCTYPE html>
 <html lang="th">
 <head>
@@ -231,7 +231,7 @@
             </p>
              <!-- CODE REVISION DISPLAY -->
              <p class="text-xs text-gray-400 mt-2 text-right">
-                เครื่องมือ Revision: <span class="font-bold text-gray-600">v1.02</span>
+                เครื่องมือ Revision: <span class="font-bold text-gray-600">v1.03</span>
              </p>
         </div>
 
@@ -292,33 +292,44 @@
                     } else {
                         await signInAnonymously(auth);
                     }
-                }
-                
-                // Wait for the user state to be determined for both cases
-                const unsubscribe = onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                    } else {
-                        // If auth failed or skipped (no config), generate a temporary UUID
-                        userId = crypto.randomUUID(); 
-                    }
                     
+                    // Wait for the user state to be determined (ONLY if 'auth' object exists)
+                    const unsubscribe = onAuthStateChanged(auth, (user) => {
+                        if (user) {
+                            userId = user.uid;
+                        } else {
+                            // If sign-in failed/user logged out, generate a temporary UUID
+                            userId = crypto.randomUUID(); 
+                        }
+                        
+                        isAuthReady = true; 
+                        console.log("Firebase initialized and user ID set:", userId);
+                        
+                        // Enable process button ONLY when Auth is definitely ready
+                        document.getElementById('processButton').disabled = document.getElementById('imageUpload').files.length === 0;
+                        
+                        unsubscribe(); 
+                    });
+
+                } else {
+                    // Firebase/Auth was skipped because config was missing. Set ready state manually.
+                    userId = crypto.randomUUID(); // Generate temporary ID
                     isAuthReady = true; 
-                    console.log("Firebase initialized and user ID set:", userId);
+                    console.log("Firebase initialization skipped. Using temporary user ID:", userId);
                     
-                    // Enable process button ONLY when Auth is definitely ready
+                    // Enable process button immediately since auth is 'ready' (skipped)
                     document.getElementById('processButton').disabled = document.getElementById('imageUpload').files.length === 0;
-                    
-                    // Display user ID for debugging in multi-user apps (optional, but good practice for sharing)
-                    // console.log("Current User ID: " + userId); 
-                    
-                    unsubscribe(); 
-                });
+                }
 
             } catch (e) {
                 console.error("Firebase Initialization Error:", e);
                 document.getElementById('errorMessage').textContent = 'Cannot initialize Firebase/Auth: ' + e.message;
                 document.getElementById('errorArea').classList.remove('hidden');
+                
+                // On error, still set readiness flag and temp user ID to allow other features to function
+                userId = crypto.randomUUID(); 
+                isAuthReady = true; 
+                document.getElementById('processButton').disabled = document.getElementById('imageUpload').files.length === 0;
             }
         }
 
